@@ -95,11 +95,35 @@ platforms:
 
 Restart Hermes gateway after changing config.
 
+## Follow-up cleanup: move storage out of `~/.openclaw`
+
+The Bot API Docker/containerd process was still bind-mounted from:
+
+```text
+/home/tankztz/.openclaw/telegram-bot-api -> /var/lib/telegram-bot-api
+```
+
+Because those files are owned as the container user (`messagebus:lxd` on the host) and the running bind mount cannot be retargeted by an unprivileged user, the actual migration needs root/Docker permissions. Helper script created on the host:
+
+```bash
+sudo bash /home/tankztz/.hermes/scripts/migrate-telegram-botapi-from-openclaw.sh
+```
+
+That script stops the Bot API container, moves the real storage to:
+
+```text
+/home/tankztz/.hermes/telegram-bot-api
+```
+
+then leaves a compatibility symlink at the old path so an existing Docker restart policy using the old bind source can still restart safely, updates Hermes `local_path_prefixes`, and restarts `hermes-gateway.service`.
+
 ## Verification commands
 
 ```bash
+stat -c '%F %A %U:%G %n' /home/tankztz/.hermes/telegram-bot-api
+readlink /home/tankztz/.openclaw/telegram-bot-api
 findmnt /var/lib/telegram-bot-api
-stat /var/lib/telegram-bot-api/*/documents/file_39.MOV
+stat /home/tankztz/.hermes/telegram-bot-api/*/documents/file_39.MOV
 hermes gateway restart
 ```
 
