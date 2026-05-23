@@ -117,6 +117,14 @@ That script stops the Bot API container, moves the real storage to:
 
 then leaves a compatibility symlink at the old path so an existing Docker restart policy using the old bind source can still restart safely, updates Hermes `local_path_prefixes`, and restarts `hermes-gateway.service`.
 
+To remove `~/.openclaw` entirely, recreate the Docker container with the bind source set directly to the Hermes path, then remove the compatibility symlink:
+
+```bash
+sudo bash /home/tankztz/.hermes/scripts/finalize-telegram-botapi-no-openclaw.sh
+```
+
+This saves `docker inspect` output under `~/.hermes/backups/telegram-bot-api-container/`, renames the old container as a backup, starts a replacement container with the same image/env/ports/restart policy but with `/home/tankztz/.hermes/telegram-bot-api` as the bind source, removes the old symlink and empty `~/.openclaw`, and restarts Hermes gateway.
+
 ## Verification commands
 
 ```bash
