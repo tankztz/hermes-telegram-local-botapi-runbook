@@ -66,7 +66,7 @@ python -m pytest tests/gateway/test_telegram_documents.py -q -o 'addopts='
 
 Push to `NousResearch/hermes-agent.git` was blocked by permissions for `tankztz`.
 
-### Deployment fix
+### Deployment fix option A: bind mount
 
 Expose the container path on the host:
 
@@ -80,6 +80,20 @@ Persistent:
 ```fstab
 /home/tankztz/.openclaw/telegram-bot-api /var/lib/telegram-bot-api none bind 0 0
 ```
+
+### Deployment fix option B: Hermes prefix mapping
+
+If sudo/root is not available, map the local Bot API container prefix to the host-visible storage path in `~/.hermes/config.yaml`:
+
+```yaml
+platforms:
+  telegram:
+    extra:
+      local_path_prefixes:
+        /var/lib/telegram-bot-api: /home/tankztz/.openclaw/telegram-bot-api
+```
+
+Restart Hermes gateway after changing config.
 
 ## Verification commands
 

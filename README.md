@@ -95,7 +95,19 @@ platforms:
       base_file_url: http://127.0.0.1:8081/bot
 ```
 
-Important: the absolute-path behavior does not rely on downloading through `/file/bot...`. In `--local` mode the returned absolute path must be readable by Hermes directly.
+If root access is unavailable and the Bot API container path differs from the host path, configure a prefix mapping instead of a bind mount:
+
+```yaml
+platforms:
+  telegram:
+    extra:
+      base_url: http://127.0.0.1:8081/bot
+      base_file_url: http://127.0.0.1:8081/bot
+      local_path_prefixes:
+        /var/lib/telegram-bot-api: /home/tankztz/.openclaw/telegram-bot-api
+```
+
+Important: the absolute-path behavior does not rely on downloading through `/file/bot...`. In `--local` mode the returned absolute path must be readable by Hermes directly, either because the path exists via bind mount or because Hermes maps the returned prefix to a host-visible path.
 
 ## Hermes code change
 
