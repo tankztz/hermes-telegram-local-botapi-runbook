@@ -2,6 +2,11 @@
 
 Reproducible notes for fixing Hermes Telegram large-file downloads when using a local `telegram-bot-api --local` server.
 
+## Incident docs
+
+- `docs/2026-05-23-telegram-local-botapi-absolute-path.md` — absolute `getFile.file_path` from local Bot API must be read from disk or prefix-mapped, not turned into `/file/bot.../var/lib/...` URLs.
+- `docs/2026-06-13-video-document-empty-message-regression.md` — regression test for Telegram `.MOV` video documents becoming empty `msg=''` turns when PTB/local Bot API download fails or metadata is dropped.
+
 ## Problem
 
 Telegram delivered an oversized video/document to the bot, but Hermes could not download the bytes. The observed error looked like this:
