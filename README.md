@@ -7,6 +7,7 @@ Reproducible notes for fixing Hermes Telegram large-file downloads when using a 
 - `docs/2026-05-23-telegram-local-botapi-absolute-path.md` — absolute `getFile.file_path` from local Bot API must be read from disk or prefix-mapped, not turned into `/file/bot.../var/lib/...` URLs.
 - `docs/2026-06-13-video-document-empty-message-regression.md` — regression test for Telegram `.MOV` video documents becoming empty `msg=''` turns when PTB/local Bot API download fails or metadata is dropped.
 - `docs/2026-06-29-latest-video-recovery.md` — emergency/operator flow for finding the newest readable local Bot API video when a Telegram media chat says “I just sent a video” but Hermes did not receive attachment metadata.
+- `docs/2026-06-30-local-botapi-video-patch-retrospective.md` — postmortem for the difficult `.MOV` video-document patch: why the first fix missed live gateway restart and URL/container-path fallback, plus the permanent test/fix shape.
 
 ## Fast recovery: latest video lookup
 
