@@ -19,6 +19,49 @@ When the Telegram gateway drops attachment metadata, do **not** ask the user to 
 
 The script scans `~/.hermes/telegram-bot-api` for recent video-like files, including iOS `.MOV` files that Telegram stores under `documents/`, and verifies readable candidates with `ffprobe` when available.
 
+## Post-update self-repair: photos and small media
+
+Symptom: Telegram text still works, but photos or image documents fail with
+`telegram.error.InvalidToken: Not Found: method not found`. This is usually not
+a revoked Bot Token. It means PTB tried an invalid HTTP file URL instead of
+reading the absolute path returned by local `telegram-bot-api --local`.
+
+After a Hermes update, check whether the small-media fallback is present:
+
+```bash
+python3 ./scripts/apply-small-media-local-path-patch.py --check
+```
+
+If the check reports `status=missing`, apply the idempotent semantic patch:
+
+```bash
+python3 ./scripts/apply-small-media-local-path-patch.py
+cd ~/.hermes/hermes-agent
+venv/bin/python -m pytest tests/gateway/test_telegram_documents.py -o 'addopts=' -q
+hermes gateway restart
+```
+
+The script supports both the current plugin adapter path and the legacy gateway
+path, refuses unknown upstream shapes, compiles the changed Python file, and is
+safe to run repeatedly. If upstream has changed the download implementation, it
+stops for inspection instead of guessing.
+
+Required config on Tianze's current host:
+
+```yaml
+platforms:
+  telegram:
+    extra:
+      local_path_prefixes:
+        /var/lib/telegram-bot-api: /home/tankztz/.hermes/telegram-bot-api
+```
+
+Current local Hermes repair commit (2026-07-25):
+
+```text
+f668fb5a6 fix(telegram): map local Bot API paths for small media
+```
+
 ## Problem
 
 Telegram delivered an oversized video/document to the bot, but Hermes could not download the bytes. The observed error looked like this:
