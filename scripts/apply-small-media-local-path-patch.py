@@ -83,10 +83,14 @@ def apply_patch(path: Path) -> bool:
         )
     if state.startswith("incomplete"):
         raise SystemExit(f"ERROR: existing helper is incomplete: {state}")
-    if original.count(ANCHOR) != 1:
-        raise SystemExit("ERROR: insertion anchor missing or ambiguous; no files changed")
-
-    updated = original.replace(ANCHOR, ANCHOR + HELPER, 1)
+    if original.count(ANCHOR) == 1:
+        updated = original.replace(ANCHOR, ANCHOR + HELPER, 1)
+    else:
+        # Newer adapters moved _append_observed_note to a mixin.
+        init_anchor = "    def __init__(self, config: PlatformConfig):\n"
+        if original.count(init_anchor) != 1:
+            raise SystemExit("ERROR: insertion anchor missing or ambiguous; no files changed")
+        updated = original.replace(init_anchor, HELPER + "\n" + init_anchor, 1)
     updated = updated.replace(DIRECT_DOWNLOAD, MAPPED_DOWNLOAD)
     helper_recursive = "return bytes(await self._download_telegram_file_bytes(file_obj))"
     helper_fallback = "return bytes(await file_obj.download_as_bytearray())"

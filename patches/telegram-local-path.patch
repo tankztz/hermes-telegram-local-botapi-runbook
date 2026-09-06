@@ -1,0 +1,173 @@
+diff --git a/plugins/platforms/telegram/adapter.py b/plugins/platforms/telegram/adapter.py
+index 73afb13b0f..4db0c954bb 100644
+--- a/plugins/platforms/telegram/adapter.py
++++ b/plugins/platforms/telegram/adapter.py
+@@ -422,6 +422,32 @@ class TelegramAdapter(BasePlatformAdapter):
+         """Telegram measures message length in UTF-16 code units."""
+         return utf16_len
+ 
++
++    async def _download_telegram_file_bytes(self, file_obj: Any) -> bytes:
++        """Read Telegram media through configured local Bot API path mappings."""
++        raw_path = getattr(file_obj, "file_path", None)
++        mappings = self.config.extra.get("local_path_prefixes", {})
++        if isinstance(raw_path, str) and isinstance(mappings, dict):
++            for remote_prefix, local_prefix in mappings.items():
++                if not isinstance(remote_prefix, str) or not isinstance(local_prefix, str):
++                    continue
++                index = raw_path.find(remote_prefix)
++                if index < 0:
++                    continue
++                suffix = raw_path[index + len(remote_prefix):].lstrip("/\\")
++                local_root = os.path.realpath(os.path.expanduser(local_prefix))
++                candidate = os.path.realpath(os.path.join(local_root, suffix))
++                try:
++                    if os.path.commonpath((local_root, candidate)) != local_root:
++                        continue
++                except ValueError:
++                    continue
++                if os.path.isfile(candidate) and os.access(candidate, os.R_OK):
++                    with open(candidate, "rb") as handle:
++                        return handle.read()
++
++        return bytes(await file_obj.download_as_bytearray())
++
+     def __init__(self, config: PlatformConfig):
+         super().__init__(config, Platform.TELEGRAM)
+         extra = self.config.extra
+@@ -5459,7 +5485,7 @@ class TelegramAdapter(BasePlatformAdapter):
+             return "oversized", file_size
+         try:
+             file_obj = await source.get_file()
+-            data = bytes(await file_obj.download_as_bytearray())
++            data = bytes(await self._download_telegram_file_bytes(file_obj))
+             if not filename:
+                 filename = os.path.basename(getattr(file_obj, "file_path", "") or "")
+             cached = await cache_media_bytes_async(data, filename=filename, mime_type=mime, default_kind=kind)
+@@ -5857,7 +5883,7 @@ class TelegramAdapter(BasePlatformAdapter):
+                 await self.handle_message(event)
+                 return True
+             file_obj = await source.get_file()
+-            data = await file_obj.download_as_bytearray()
++            data = await self._download_telegram_file_bytes(file_obj)
+             if kind == "video":
+                 ext = self._ext_from_path(getattr(file_obj, "file_path", None), SUPPORTED_VIDEO_TYPES, ext)
+                 cached_path = await cache_video_from_bytes_async(bytes(data), ext=ext)
+@@ -5906,7 +5932,7 @@ class TelegramAdapter(BasePlatformAdapter):
+             # Screenshots/photos sent as documents take the image cache + batching path.
+             if ext in _TELEGRAM_IMAGE_EXTENSIONS or doc_mime.startswith("image/"):
+                 file_obj = await doc.get_file()
+-                image_bytes = await file_obj.download_as_bytearray()
++                image_bytes = await self._download_telegram_file_bytes(file_obj)
+                 image_ext = ext if ext in _TELEGRAM_IMAGE_EXTENSIONS else _TELEGRAM_IMAGE_MIME_TO_EXT.get(doc_mime, ".jpg")
+                 try:
+                     cached_path = await cache_image_from_bytes_async(bytes(image_bytes), ext=image_ext)
+@@ -5930,7 +5956,7 @@ class TelegramAdapter(BasePlatformAdapter):
+                 ext = image_mime_to_ext.get(doc.mime_type, "")
+             if ext in SUPPORTED_VIDEO_TYPES:
+                 file_obj = await doc.get_file()
+-                video_bytes = await file_obj.download_as_bytearray()
++                video_bytes = await self._download_telegram_file_bytes(file_obj)
+                 self._set_cached_media(
+                     event, await cache_video_from_bytes_async(bytes(video_bytes), ext=ext), SUPPORTED_VIDEO_TYPES[ext], MessageType.VIDEO,
+                     "[Telegram] Cached user video document at %s")
+@@ -5939,7 +5965,7 @@ class TelegramAdapter(BasePlatformAdapter):
+             # Any file type is accepted (authorization is the gate, not the extension); unknown types get
+             # application/octet-stream. Image documents already returned above.
+             file_obj = await doc.get_file()
+-            raw_bytes = bytes(await file_obj.download_as_bytearray())
++            raw_bytes = bytes(await self._download_telegram_file_bytes(file_obj))
+             from gateway.platforms.base import cache_media_bytes_async
+             cached = await cache_media_bytes_async(raw_bytes, filename=original_filename or f"document{ext or '.bin'}", mime_type=doc_mime)
+             if cached is None:
+@@ -5995,7 +6021,7 @@ class TelegramAdapter(BasePlatformAdapter):
+         if msg.photo:
+             try:
+                 file_obj = await msg.photo[-1].get_file()  # PhotoSize list sorted by size; largest last
+-                image_bytes = await file_obj.download_as_bytearray()
++                image_bytes = await self._download_telegram_file_bytes(file_obj)
+                 ext = self._ext_from_path(file_obj.file_path, [".png", ".webp", ".gif", ".jpeg", ".jpg"], ".jpg")
+                 self._set_cached_media(
+                     event, await cache_image_from_bytes_async(bytes(image_bytes), ext=ext), f"image/{ext.lstrip('.')}", event.message_type,
+@@ -6058,7 +6084,7 @@ class TelegramAdapter(BasePlatformAdapter):
+         fallback = f"a sticker with emoji {emoji}" if emoji else "a sticker"
+         try:
+             file_obj = await sticker.get_file()
+-            image_bytes = await file_obj.download_as_bytearray()
++            image_bytes = await self._download_telegram_file_bytes(file_obj)
+             cached_path = await cache_image_from_bytes_async(bytes(image_bytes), ext=".webp")
+             logger.info("[Telegram] Analyzing sticker at %s", cached_path)
+             from tools.vision_tools import vision_analyze_tool
+diff --git a/tests/gateway/test_telegram_documents.py b/tests/gateway/test_telegram_documents.py
+index fd3b406a08..487845f1a8 100644
+--- a/tests/gateway/test_telegram_documents.py
++++ b/tests/gateway/test_telegram_documents.py
+@@ -158,7 +158,68 @@ def _make_photo(file_obj=None):
+ 
+ 
+ class TestDocumentDownloadBlock:
++    @pytest.mark.asyncio
++    async def test_local_bot_api_large_document(self, adapter, tmp_path):
++        root = tmp_path / "storage"
++        root.mkdir()
++        payload = b"x" * (32 * 1024 * 1024)
++        (root / "large.MOV").write_bytes(payload)
++        adapter.config.extra = {"local_path_prefixes": {"/var/lib/telegram-bot-api": str(root)}}
++        file_obj = _make_file_obj(b"wrong-http-fallback")
++        file_obj.file_path = "/var/lib/telegram-bot-api/large.MOV"
++        assert await adapter._download_telegram_file_bytes(file_obj) == payload
++        file_obj.download_as_bytearray.assert_not_awaited()
++
++    @pytest.mark.asyncio
++    async def test_local_bot_api_rejects_path_escape(self, adapter, tmp_path):
++        root = tmp_path / "storage"
++        root.mkdir()
++        (tmp_path / "private.txt").write_bytes(b"must-not-read")
++        adapter.config.extra = {"local_path_prefixes": {"/var/lib/telegram-bot-api": str(root)}}
++        file_obj = _make_file_obj(b"http-fallback")
++        file_obj.file_path = "/var/lib/telegram-bot-api/../private.txt"
++        assert await adapter._download_telegram_file_bytes(file_obj) == b"http-fallback"
++        file_obj.download_as_bytearray.assert_awaited_once()
++    @pytest.mark.asyncio
++    async def test_local_bot_api_prefix_mapping_reads_small_media(self, adapter, tmp_path):
++        mapped_root = tmp_path / "telegram-bot-api"
++        mapped_file = mapped_root / "fake-token" / "photos" / "file_107.jpg"
++        mapped_file.parent.mkdir(parents=True)
++        mapped_file.write_bytes(b"local-photo-bytes")
++        adapter.config.extra = {
++            "local_path_prefixes": {
++                "/var/lib/telegram-bot-api": str(mapped_root),
++            },
++        }
++        file_obj = _make_file_obj(b"http-fallback")
++        file_obj.file_path = "/var/lib/telegram-bot-api/fake-token/photos/file_107.jpg"
++
++        data = await adapter._download_telegram_file_bytes(file_obj)
++
++        assert data == b"local-photo-bytes"
++        file_obj.download_as_bytearray.assert_not_awaited()
++
++    @pytest.mark.asyncio
++    async def test_local_bot_api_prefix_mapping_handles_ptb_url(self, adapter, tmp_path):
++        mapped_root = tmp_path / "telegram-bot-api"
++        mapped_file = mapped_root / "fake-token" / "documents" / "file_112.JPG"
++        mapped_file.parent.mkdir(parents=True)
++        mapped_file.write_bytes(b"local-image-document")
++        adapter.config.extra = {
++            "local_path_prefixes": {
++                "/var/lib/telegram-bot-api": str(mapped_root),
++            },
++        }
++        file_obj = _make_file_obj(b"http-fallback")
++        file_obj.file_path = (
++            "http://127.0.0.1:8081/botREDACTED//var/lib/telegram-bot-api/"
++            "fake-token/documents/file_112.JPG"
++        )
++
++        data = await adapter._download_telegram_file_bytes(file_obj)
+ 
++        assert data == b"local-image-document"
++        file_obj.download_as_bytearray.assert_not_awaited()
+ 
+     @pytest.mark.asyncio
+     async def test_supported_txt_injects_content(self, adapter):
